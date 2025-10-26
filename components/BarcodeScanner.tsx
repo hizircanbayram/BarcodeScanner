@@ -1,7 +1,9 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import React, { useEffect, useRef, useState } from "react";
-import { Dimensions, StyleSheet, Text, View } from "react-native";
+import { Dimensions, StyleSheet, Text, View, TouchableOpacity } from "react-native";
 import { Svg, Rect as SvgRect } from "react-native-svg";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
 
 interface DetectedBarcode {
   x: number;
@@ -20,7 +22,8 @@ interface DetectedBarcode {
 
 export default function BarcodeScannerScreen() {
   const [permission, requestPermission] = useCameraPermissions();
-  const [scannedBarcodes, setScannedBarcodes] = useState<DetectedBarcode[]>([]);
+  const [scannedBarcodes, setScannedBarcodes] = useState<DetectedBarcode[]>([]); // Display - 2sec timeout
+  const [allDetectedBarcodes, setAllDetectedBarcodes] = useState<DetectedBarcode[]>([]); // Archive - never deleted
   const [uniqueBarcodes, setUniqueBarcodes] = useState<Set<string>>(new Set());
   const [cameraLayout, setCameraLayout] = useState({ width: 0, height: 0 });
   const cameraRef = useRef<CameraView>(null);
@@ -49,6 +52,37 @@ export default function BarcodeScannerScreen() {
 
     return () => clearInterval(interval);
   }, []);
+
+  const handleShareBarcodes = async () => {
+    try {
+      if (allDetectedBarcodes.length === 0) {
+        alert("No barcodes to share");
+        return;
+      }
+
+      // Create txt content - just barcode values
+      const content = allDetectedBarcodes
+        .map((barcode) => barcode.value)
+        .join("\n");
+
+      // Save to file using legacy API
+      const fileUri = `${FileSystem.cacheDirectory}barcodes.txt`;
+      await FileSystem.writeAsStringAsync(fileUri, content);
+
+      // Share
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: "text/plain",
+          dialogTitle: "Share Barcodes",
+        });
+      } else {
+        alert("Sharing is not available on this device");
+      }
+    } catch (error) {
+      console.error("Error sharing barcodes:", error);
+      alert("Failed to share barcodes");
+    }
+  };
 
   const handleBarcodeScanned = (result: any) => {
     // Handle barcode detection
@@ -116,7 +150,7 @@ export default function BarcodeScannerScreen() {
           rawHeight: result.bounds?.size?.height || 0,
         };
 
-        // Update state efficiently
+        // Update display state (with 2sec timeout)
         setScannedBarcodes((prev) => {
           const existingIndex = prev.findIndex((b) => b.value === result.data);
           if (existingIndex >= 0) {
@@ -133,6 +167,20 @@ export default function BarcodeScannerScreen() {
             return updated;
           } else {
             // Add new barcode
+            return [...prev, newBarcode];
+          }
+        });
+
+        // Update archive state (never deleted)
+        setAllDetectedBarcodes((prev) => {
+          const existingIndex = prev.findIndex((b) => b.value === result.data);
+          if (existingIndex >= 0) {
+            // Update existing
+            const updated = [...prev];
+            updated[existingIndex] = newBarcode;
+            return updated;
+          } else {
+            // Add new
             return [...prev, newBarcode];
           }
         });
@@ -209,6 +257,12 @@ export default function BarcodeScannerScreen() {
           ))}
         </Svg>
 
+        {/* Share Button - Sol üst köşe */}
+        <TouchableOpacity
+          style={styles.shareButton}
+          onPress={handleShareBarcodes}>
+          <Text style={styles.shareButtonText}>📤 Share</Text>
+        </TouchableOpacity>
 
         {/* Counter - Sağ üst köşe */}
         <View style={styles.counterBox}>
@@ -285,6 +339,25 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "600",
     letterSpacing: 0.5,
+  },
+  shareButton: {
+    position: "absolute",
+    top: 20,
+    left: 20,
+    backgroundColor: "rgba(52, 152, 219, 0.9)",
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 25,
+    borderWidth: 2,
+    borderColor: "#3498db",
+  },
+  shareButtonText: {
+    fontSize: 14,
+    color: "#fff",
+    fontWeight: "bold",
   },
   debugBox: {
     position: "absolute",
