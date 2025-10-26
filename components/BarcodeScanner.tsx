@@ -40,7 +40,7 @@ export default function BarcodeScannerScreen() {
 
   // Cleanup stale barcodes periodically (not detected for 2+ seconds)
   useEffect(() => {
-    const STALE_TIMEOUT = 2000; // 2 seconds - barcodes persist even if detection drops
+    const STALE_TIMEOUT = 1000; // 1 second - barcodes persist even if detection drops
     const CHECK_INTERVAL = 100; // Check every 100ms
 
     const interval = setInterval(() => {
