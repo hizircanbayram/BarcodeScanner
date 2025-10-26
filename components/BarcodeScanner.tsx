@@ -34,21 +34,42 @@ export default function BarcodeScannerScreen() {
     })();
   }, [permission, requestPermission]);
 
+  // Clear barcodes when none are detected in current frame (optimized with ref)
+  const barcodeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    // Set timeout to clear barcodes if they're stale
+    if (scannedBarcodes.length > 0) {
+      if (barcodeTimeoutRef.current) {
+        clearTimeout(barcodeTimeoutRef.current);
+      }
+
+      barcodeTimeoutRef.current = setTimeout(() => {
+        setScannedBarcodes([]);
+      }, 500); // Clear after 500ms of no new detections
+    }
+
+    return () => {
+      if (barcodeTimeoutRef.current) {
+        clearTimeout(barcodeTimeoutRef.current);
+      }
+    };
+  }, [scannedBarcodes]);
+
   const handleBarcodeScanned = (result: any) => {
     // Handle barcode detection
     try {
       if (result && result.data) {
         const now = Date.now();
 
-        // Avoid duplicate scans within 800ms
-        if (scannedBarcodes.length > 0) {
-          const lastScan = scannedBarcodes[scannedBarcodes.length - 1];
-          if (
-            now - lastScan.timestamp < 800 &&
-            lastScan.value === result.data
-          ) {
-            return;
-          }
+        // Avoid duplicate scans within 800ms - check all barcodes
+        const duplicateExists = scannedBarcodes.some(
+          (barcode) =>
+            now - barcode.timestamp < 800 && barcode.value === result.data
+        );
+
+        if (duplicateExists) {
+          return;
         }
 
         // Check if barcode is unique
@@ -87,17 +108,6 @@ export default function BarcodeScannerScreen() {
           height = w_cam; //* (previewHeight / camHeight);
         }
 
-        console.log(
-          `x=${x.toFixed(1)}, y=${y.toFixed(1)}, width=${width.toFixed(
-            1
-          )}, height=${height.toFixed(
-            1
-          )}, camWidth=${cameraLayout.width.toFixed(
-            1
-          )}, camHeight=${cameraLayout.height.toFixed(1)},
-          screenWidth=${screenWidth}, screenHeight=${screenHeight}`
-        );
-
         const newBarcode: DetectedBarcode = {
           x,
           y,
@@ -105,34 +115,23 @@ export default function BarcodeScannerScreen() {
           height,
           value: result.data,
           timestamp: now,
-          // Store raw values for comparison
           rawX: result.bounds?.origin?.x || 0,
           rawY: result.bounds?.origin?.y || 0,
           rawWidth: result.bounds?.size?.width || 0,
           rawHeight: result.bounds?.size?.height || 0,
         };
 
-        console.log(
-          `CAMERA BOUNDS: x[0-${cameraLayout.width}] y[0-${cameraLayout.height}] | ` +
-            `RAW (x_cam, y_cam): (${
-              scannedBarcodes.length > 0
-                ? scannedBarcodes[0].rawX.toFixed(1)
-                : "N/A"
-            }, ${
-              scannedBarcodes.length > 0
-                ? scannedBarcodes[0].rawY.toFixed(1)
-                : "N/A"
-            }) | ` +
-            `TRANSFORMED (x, y): (${x.toFixed(1)}, ${y.toFixed(1)}) | ` +
-            `VALUE: ${result.data}`
-        );
-        console.log(
-          `SCREEN SPACE: x[0-${screenWidth}] y[0-${screenHeight}] | WIDTH: ${width.toFixed(
-            1
-          )} HEIGHT: ${height.toFixed(1)}`
-        );
-
-        setScannedBarcodes([newBarcode]);
+        // Update state efficiently
+        setScannedBarcodes((prev) => {
+          const existingIndex = prev.findIndex((b) => b.value === result.data);
+          if (existingIndex >= 0) {
+            const updated = [...prev];
+            updated[existingIndex] = newBarcode;
+            return updated;
+          } else {
+            return [...prev, newBarcode];
+          }
+        });
       }
     } catch (error) {
       console.error("Error processing barcode:", error);
@@ -163,7 +162,7 @@ export default function BarcodeScannerScreen() {
         ref={cameraRef}
         style={styles.camera}
         facing="back"
-        autofocus="on"
+        autofocus="off"
         onLayout={(e) => {
           const { width, height } = e.nativeEvent.layout;
           setCameraLayout({ width, height });
@@ -206,26 +205,6 @@ export default function BarcodeScannerScreen() {
           ))}
         </Svg>
 
-        {/* Debug Info - Sol üst köşe */}
-        <View style={styles.debugBox}>
-          <Text style={styles.debugText}>
-            Camera: {cameraLayout.width.toFixed(0)} x{" "}
-            {cameraLayout.height.toFixed(0)}
-          </Text>
-          <Text style={styles.debugText}>
-            Screen: {screenWidth} x {screenHeight}
-          </Text>
-          {cameraLayout.width > 0 && (
-            <>
-              <Text style={styles.debugText}>
-                Ratio X: {(screenWidth / cameraLayout.width).toFixed(3)}
-              </Text>
-              <Text style={styles.debugText}>
-                Ratio Y: {(screenHeight / cameraLayout.height).toFixed(3)}
-              </Text>
-            </>
-          )}
-        </View>
 
         {/* Counter - Sağ üst köşe */}
         <View style={styles.counterBox}>
@@ -233,30 +212,6 @@ export default function BarcodeScannerScreen() {
           <Text style={styles.counterLabel}>Unique</Text>
         </View>
 
-        {/* Display detected barcode info */}
-        {scannedBarcodes.length > 0 && (
-          <View style={styles.infoBox}>
-            <Text style={styles.infoText} numberOfLines={1}>
-              Value: {scannedBarcodes[0].value}
-            </Text>
-            <Text style={styles.infoText}>
-              TRANSFORMED - X: {Math.round(scannedBarcodes[0].x)}, Y:{" "}
-              {Math.round(scannedBarcodes[0].y)}
-            </Text>
-            <Text style={styles.infoText}>
-              TRANSFORMED - W: {Math.round(scannedBarcodes[0].width)}, H:{" "}
-              {Math.round(scannedBarcodes[0].height)}
-            </Text>
-            <Text style={styles.infoText}>
-              RAW - X: {Math.round(scannedBarcodes[0].rawX)}, Y:{" "}
-              {Math.round(scannedBarcodes[0].rawY)}
-            </Text>
-            <Text style={styles.infoText}>
-              RAW - W: {Math.round(scannedBarcodes[0].rawWidth)}, H:{" "}
-              {Math.round(scannedBarcodes[0].rawHeight)}
-            </Text>
-          </View>
-        )}
       </CameraView>
     </View>
   );
