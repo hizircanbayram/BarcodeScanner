@@ -10,6 +10,7 @@ interface DetectedBarcode {
   height: number;
   value: string;
   timestamp: number;
+  lastSeen: number; // Last time this barcode was detected
   // Raw expo-camera values
   rawX: number;
   rawY: number;
@@ -34,27 +35,20 @@ export default function BarcodeScannerScreen() {
     })();
   }, [permission, requestPermission]);
 
-  // Clear barcodes when none are detected in current frame (optimized with ref)
-  const barcodeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
+  // Cleanup stale barcodes periodically (not detected for 2+ seconds)
   useEffect(() => {
-    // Set timeout to clear barcodes if they're stale
-    if (scannedBarcodes.length > 0) {
-      if (barcodeTimeoutRef.current) {
-        clearTimeout(barcodeTimeoutRef.current);
-      }
+    const STALE_TIMEOUT = 2000; // 2 seconds - barcodes persist even if detection drops
+    const CHECK_INTERVAL = 100; // Check every 100ms
 
-      barcodeTimeoutRef.current = setTimeout(() => {
-        setScannedBarcodes([]);
-      }, 500); // Clear after 500ms of no new detections
-    }
+    const interval = setInterval(() => {
+      setScannedBarcodes((prev) => {
+        const now = Date.now();
+        return prev.filter((barcode) => now - barcode.lastSeen < STALE_TIMEOUT);
+      });
+    }, CHECK_INTERVAL);
 
-    return () => {
-      if (barcodeTimeoutRef.current) {
-        clearTimeout(barcodeTimeoutRef.current);
-      }
-    };
-  }, [scannedBarcodes]);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleBarcodeScanned = (result: any) => {
     // Handle barcode detection
@@ -115,6 +109,7 @@ export default function BarcodeScannerScreen() {
           height,
           value: result.data,
           timestamp: now,
+          lastSeen: now, // Track when barcode was last detected
           rawX: result.bounds?.origin?.x || 0,
           rawY: result.bounds?.origin?.y || 0,
           rawWidth: result.bounds?.size?.width || 0,
@@ -125,10 +120,19 @@ export default function BarcodeScannerScreen() {
         setScannedBarcodes((prev) => {
           const existingIndex = prev.findIndex((b) => b.value === result.data);
           if (existingIndex >= 0) {
+            // Update existing barcode - refresh lastSeen and position
             const updated = [...prev];
-            updated[existingIndex] = newBarcode;
+            updated[existingIndex] = {
+              ...updated[existingIndex],
+              x,
+              y,
+              width,
+              height,
+              lastSeen: now, // Refresh detection time
+            };
             return updated;
           } else {
+            // Add new barcode
             return [...prev, newBarcode];
           }
         });
